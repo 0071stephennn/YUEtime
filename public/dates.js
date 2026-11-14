@@ -12,3 +12,14 @@ export function expiryForDate(date) {
 export function expiryLabel(expiresAt) {
   return shanghaiDate.format(expiresAt) + " 00:00";
 }
+
+export function shiftDate(date, days) {
+  return new Date(Date.parse(date) + days * day).toISOString().slice(0, 10);
+}
+
+export function calendarDates(month) {
+  const first = month + "-01";
+  const weekday = new Date(first).getUTCDay();
+  const offset = (weekday + 6) % 7;
+  return Array.from({ length: 42 }, (_, index) => shiftDate(first, index - offset));
+}

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import worker from "./worker.mjs";
+import { expiryForDate, todayInShanghai } from "./public/dates.js";
 
 const databasePath = process.env.YUETIME_DB || fileURLToPath(new URL("./yuetime.sqlite", import.meta.url));
 const sqlite = new DatabaseSync(databasePath);
@@ -41,12 +42,26 @@ async function cleanUpExpiredEvents() {
 }
 
 await cleanUpExpiredEvents();
-setInterval(() => { cleanUpExpiredEvents().catch(error => console.error(error)); }, 300_000).unref();
+function scheduleCleanup() {
+  const now = Date.now();
+  const delay = expiryForDate(todayInShanghai(now)) - now;
+  setTimeout(async () => {
+    try {
+      await cleanUpExpiredEvents();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      scheduleCleanup();
+    }
+  }, delay).unref();
+}
+scheduleCleanup();
 
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/app.js", ["app.js", "text/javascript"]],
   ["/dates.js", ["dates.js", "text/javascript"]],
+  ["/drag-select.js", ["drag-select.js", "text/javascript"]],
   ["/style.css", ["style.css", "text/css"]],
 ]);
 
