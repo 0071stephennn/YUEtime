@@ -15,11 +15,18 @@ export function expiryLabel(expiresAt) {
 }
 
 export function shiftDate(date, days) {
-  return new Date(Date.parse(date) + days * day).toISOString().slice(0, 10);
+  return new Date(Date.parse(date) + days * day).toISOString().split("T")[0];
 }
 
 export function daysBetween(first, last) {
   return (Date.parse(last) - Date.parse(first)) / day;
+}
+
+export function pollWeek(first, last) {
+  const midpoint = Math.floor(daysBetween(first, last) / 2);
+  const halfWeek = Math.floor(maxDateSpan / 2);
+  return Array.from({ length: maxDateSpan }, (_, index) =>
+    shiftDate(first, midpoint - halfWeek + index));
 }
 
 export function calendarDates(month) {

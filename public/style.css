@@ -126,14 +126,8 @@ input::placeholder { color: #647168; }
 table { border-spacing: 0; table-layout: fixed; width: 100%; text-align: center; user-select: none; }
 thead th { background: #f7f9f4; border-bottom: 1px solid var(--line); padding: 1px; }
 thead th:first-child, tbody th { width: clamp(35px, 8vw, 54px); font-size: 11px; color: var(--muted); }
-th.date-gap, td.date-gap {
-  width: 29px; padding: 0; border: 0; background: #dce0de;
-}
-.gap-dates {
-  display: block; color: #465149; font-size: 10px; font-weight: 600;
-  line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums;
-}
-.gap-dates span { display: block; line-height: .8; }
+thead th.inactive-day, td.inactive-day { background: #dce0de; }
+th.inactive-day .day-header { color: #465149; }
 thead th.weekend { background: #e8efe6; }
 tbody th { background: #f7f9f4; padding: 0; line-height: 1; }
 tbody th, td { border-bottom: 1px solid #e5ebe1; }

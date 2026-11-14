@@ -1,4 +1,4 @@
-import { calendarDates, daysBetween, expiryForDate, expiryLabel, maxDateSpan, shiftDate, todayInShanghai } from "./dates.js";
+import { calendarDates, daysBetween, expiryForDate, expiryLabel, maxDateSpan, pollWeek, shiftDate, todayInShanghai } from "./dates.js";
 import { bindDragSelection } from "./drag-select.js";
 
 const app = document.querySelector("#app");
@@ -365,37 +365,31 @@ function dayCells(date) {
 
 function grid(mode, slots = {}, total = 0) {
   const result = mode === "results";
-  const columns = event.dates.flatMap((date, index) => {
-    const weekdayIndex = new Date(date).getUTCDay();
-    const weekend = weekdayIndex === 0 || weekdayIndex === 6;
-    const previous = event.dates[index - 1];
-    if (previous && daysBetween(previous, date) > 1) {
-      return [{ gap: { first: shiftDate(previous, 1), last: shiftDate(date, -1) } }, { date, weekend }];
-    }
-    return [{ date, weekend }];
+  const first = event.dates[0];
+  const last = event.dates.at(-1);
+  const dates = daysBetween(first, last) < maxDateSpan ? pollWeek(first, last) : event.dates;
+  const columns = dates.map(date => {
+    const day = new Date(date).getUTCDay();
+    const candidate = event.dates.includes(date);
+    const className = !candidate ? "inactive-day" : day === 0 || day === 6 ? "weekend" : "";
+    return { date, candidate, className };
   });
-  const header = columns.map(({ date, weekend, gap }) => {
-    if (gap) {
-      const first = dateText(gap.first);
-      const last = dateText(gap.last);
-      const range = gap.first !== gap.last;
-      const label = "跳过 " + gap.first + (range ? " 至 " + gap.last : "");
-      return `<th class="date-gap" scope="col" title="${label}" aria-label="${label}">
-        <span class="gap-dates" aria-hidden="true">${first}${range ? "<span>–</span>" + last : ""}</span>
-      </th>`;
+  const header = columns.map(({ date, candidate, className }) => {
+    const label = `<strong>${dateText(date)}</strong><span>${weekday(date)}</span>`;
+    if (!candidate || result) {
+      return `<th scope="col" class="${className}"${candidate ? "" : ' aria-label="' + dateLabel(date) + '，非候选日期"'}>
+        <div class="day-header">${label}</div></th>`;
     }
-    return `<th scope="col"${weekend ? ' class="weekend"' : ""}>${result
-      ? '<div class="day-header"><strong>' + dateText(date) + '</strong><span>' + weekday(date) + '</span></div>'
-      : '<button class="day-header day-toggle" data-day="' + date + '" type="button"><strong>' +
-        dateText(date) + '</strong><span>' + weekday(date) + '</span><small></small></button>'}</th>`;
+    return `<th scope="col" class="${className}"><button class="day-header day-toggle" data-day="${date}"
+      type="button">${label}<small></small></button></th>`;
   }).join("");
   const rows = makeHours(event).map(hour => {
-    const cells = columns.map(({ date, weekend, gap }) => {
-      if (gap) return '<td class="date-gap" aria-hidden="true"></td>';
+    const cells = columns.map(({ date, candidate, className }) => {
+      if (!candidate) return '<td class="inactive-day"></td>';
       const cell = date + "|" + hour;
       const count = slots[cell]?.length || 0;
       const label = dateLabel(date) + " " + hourText(hour) + "–" + hourText(hour + 1);
-      return `<td${weekend ? ' class="weekend"' : ""}><button type="button" class="slot ${result ? "result-slot" : "vote-slot"}"
+      return `<td class="${className}"><button type="button" class="slot ${result ? "result-slot" : "vote-slot"}"
         data-cell="${cell}" aria-label="${label}${result ? "，" + count + " 人有空" : ""}"
         ${result ? 'style="--fill:' + heatColor(count, total) + '"' : ""}>
         ${result ? count : '<span aria-hidden="true">✓</span>'}</button></td>`;
@@ -522,7 +516,7 @@ function renderVote() {
         <li>选一片时间时，可以拖动，也可以点「框选时段」，再点两个对角格。</li>
         <li>点「提交并查看热力图」。如果都来不了，点「这些时间我都来不了」。</li>
       </ol>
-      <p>灰条标出跳过的日期。浅色列是周六或周日。</p>
+      <p>灰色列是非候选日期。候选日期中的周六、周日带浅底色。</p>
       <p>提交后可在热力图上点「修改我的时间」，更新原答卷。</p>
     </dialog>
   </div>`;
