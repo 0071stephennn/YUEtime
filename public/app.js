@@ -442,6 +442,18 @@ function bindGrid() {
   return range;
 }
 
+function showFirstVisitGuide() {
+  const guide = app.querySelector("#vote-guide");
+  const key = "yuetime:guide:" + eventId;
+  try {
+    if (localStorage.getItem(key) === "seen") return;
+  } catch {}
+  guide.showModal();
+  try {
+    localStorage.setItem(key, "seen");
+  } catch {}
+}
+
 function renderVote() {
   chosen = new Set(vote?.cells || []);
   draftName = vote?.name || "";
@@ -467,6 +479,18 @@ function renderVote() {
       </div></div>
       ${grid("vote")}
     </form>
+    <dialog id="vote-guide" class="vote-guide" aria-labelledby="vote-guide-title">
+      <form method="dialog">
+        <button class="guide-close" type="submit" aria-label="关闭填写指南" autofocus>×</button>
+      </form>
+      <h2 id="vote-guide-title">怎么填写</h2>
+      <ol>
+        <li>填上你的名字，选中你有空的时段。点单格切换，点日期表头选整天。</li>
+        <li>选一片时间时，可以拖动，也可以点「框选时段」，再点两个对角格。</li>
+        <li>点「提交并查看热力图」。如果都来不了，点「这些时间我都来不了」。</li>
+      </ol>
+      <p>提交后可在热力图上点「修改我的时间」，更新原答卷。</p>
+    </dialog>
   </div>`;
   app.querySelector("#name").value = draftName;
   app.querySelector("#copy-link").onclick = click => copyLink(click.currentTarget);
@@ -586,7 +610,10 @@ async function init() {
       history.replaceState(null, "", url);
     }
     if (vote) await loadResults();
-    else renderVote();
+    else {
+      renderVote();
+      showFirstVisitGuide();
+    }
     checkPageExpiry();
   } catch (error) {
     showUnavailable(errorText(error));

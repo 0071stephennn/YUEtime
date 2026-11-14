@@ -158,6 +158,22 @@ td { border-left: 1px solid #e5ebe1; padding: 0; }
 .refresh-icon { font-size: 19px; line-height: 1; }
 .slot-detail { margin-top: 4px; padding: 4px 6px; border-radius: 6px; background: #f3f6ee; font-size: 12px; }
 .slot-detail p { margin-top: 4px; overflow-wrap: anywhere; color: var(--muted); }
+.vote-guide {
+  position: fixed; width: min(420px, calc(100% - 24px)); max-height: calc(100dvh - 24px);
+  padding: 20px; border: 1px solid var(--line); border-radius: 14px;
+  background: #fff; color: var(--ink); font-size: 14px; line-height: 1.5;
+  box-shadow: 0 12px 40px #17291e32;
+}
+.vote-guide::backdrop { background: #17291e73; }
+.vote-guide h2 { margin: 0; padding-right: 38px; font-size: 21px; }
+.vote-guide ol { padding-left: 1.3em; margin: 10px 0; }
+.vote-guide li + li { margin-top: 6px; }
+.vote-guide p { color: var(--muted); }
+.guide-close {
+  position: absolute; top: 6px; right: 6px; width: 40px; height: 40px;
+  padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 23px;
+}
+.guide-close:hover { background: #edf3ea; }
 @media (max-width: 520px) {
   .header-inner { min-height: 40px; padding-inline: 8px; }
   .brand { font-size: 16px; }
