@@ -368,13 +368,21 @@ function grid(mode, slots = {}, total = 0) {
   const columns = event.dates.flatMap((date, index) => {
     const weekdayIndex = new Date(date).getUTCDay();
     const weekend = weekdayIndex === 0 || weekdayIndex === 6;
-    const missing = index ? daysBetween(event.dates[index - 1], date) - 1 : 0;
-    return missing > 0 ? [{ missing }, { date, weekend }] : [{ date, weekend }];
+    const previous = event.dates[index - 1];
+    if (previous && daysBetween(previous, date) > 1) {
+      return [{ gap: { first: shiftDate(previous, 1), last: shiftDate(date, -1) } }, { date, weekend }];
+    }
+    return [{ date, weekend }];
   });
-  const header = columns.map(({ date, weekend, missing }) => {
-    if (missing) {
-      const label = "跳过 " + missing + " 天";
-      return '<th class="date-gap" scope="col" title="' + label + '" aria-label="' + label + '"></th>';
+  const header = columns.map(({ date, weekend, gap }) => {
+    if (gap) {
+      const first = dateText(gap.first);
+      const last = dateText(gap.last);
+      const range = gap.first !== gap.last;
+      const label = "跳过 " + gap.first + (range ? " 至 " + gap.last : "");
+      return `<th class="date-gap" scope="col" title="${label}" aria-label="${label}">
+        <span class="gap-dates" aria-hidden="true">${first}${range ? "<span>–</span>" + last : ""}</span>
+      </th>`;
     }
     return `<th scope="col"${weekend ? ' class="weekend"' : ""}>${result
       ? '<div class="day-header"><strong>' + dateText(date) + '</strong><span>' + weekday(date) + '</span></div>'
@@ -382,8 +390,8 @@ function grid(mode, slots = {}, total = 0) {
         dateText(date) + '</strong><span>' + weekday(date) + '</span><small></small></button>'}</th>`;
   }).join("");
   const rows = makeHours(event).map(hour => {
-    const cells = columns.map(({ date, weekend, missing }) => {
-      if (missing) return '<td class="date-gap" aria-hidden="true"></td>';
+    const cells = columns.map(({ date, weekend, gap }) => {
+      if (gap) return '<td class="date-gap" aria-hidden="true"></td>';
       const cell = date + "|" + hour;
       const count = slots[cell]?.length || 0;
       const label = dateLabel(date) + " " + hourText(hour) + "–" + hourText(hour + 1);
@@ -514,7 +522,7 @@ function renderVote() {
         <li>选一片时间时，可以拖动，也可以点「框选时段」，再点两个对角格。</li>
         <li>点「提交并查看热力图」。如果都来不了，点「这些时间我都来不了」。</li>
       </ol>
-      <p>窄灰条表示中间跳过了日期。浅色列是周六或周日。</p>
+      <p>灰条标出跳过的日期。浅色列是周六或周日。</p>
       <p>提交后可在热力图上点「修改我的时间」，更新原答卷。</p>
     </dialog>
   </div>`;
