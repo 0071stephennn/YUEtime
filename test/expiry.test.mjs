@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { expiryForDate, expiryLabel, todayInShanghai } from "../public/dates.js";
+import { expiryForDate, expiryLabel, shiftDate, todayInShanghai } from "../public/dates.js";
 import worker from "../worker.mjs";
 
 const initial = await readFile(new URL("../migrations/0001_initial.sql", import.meta.url), "utf8");
@@ -64,23 +64,25 @@ test("only live, submitted sessions can access results and cleanup is scoped", a
 
   const now = Date.now();
   const today = todayInShanghai(now);
-  const tomorrow = todayInShanghai(now + 86_400_000);
+  const lastDate = shiftDate(today, 6);
   const yesterday = todayInShanghai(now - 86_400_000);
-  const eventBody = { title: "Trial", dates: [tomorrow, today], startHour: 9, endHour: 23 };
+  const eventBody = { title: "Trial", dates: [lastDate, today], startHour: 9, endHour: 23 };
   assert.equal((await call("", "POST", { ...eventBody, dates: [yesterday] })).status, 400);
+  assert.equal((await call("", "POST", { ...eventBody, dates: [shiftDate(today, 7), today] })).status, 400);
   const create = await call("", "POST", eventBody);
   assert.equal(create.status, 201);
   const { event } = await create.json();
-  assert.deepEqual(event.dates, [today, tomorrow]);
-  assert.equal(event.expiresAt, expiryForDate(tomorrow));
+  assert.deepEqual(event.dates, [today, lastDate]);
+  assert.equal(event.expiresAt, expiryForDate(lastDate));
   const path = "/" + event.id;
   const view = await call(path);
   const voteCookie = view.headers.get("Set-Cookie").split(";")[0];
   assert.equal((await call(path + "/results", "GET", undefined, voteCookie)).status, 403);
-  const vote = { name: "Alex", cells: [tomorrow + "|9"] };
+  const vote = { name: "Alex", cells: [lastDate + "|9"] };
+  assert.equal((await call(path + "/vote", "PUT", { ...vote, cells: [shiftDate(today, 1) + "|9"] }, voteCookie)).status, 400);
   assert.equal((await call(path + "/vote", "PUT", vote, voteCookie)).status, 200);
   const result = await call(path + "/results", "GET", undefined, voteCookie);
-  assert.deepEqual((await result.json()).slots[tomorrow + "|9"], ["Alex"]);
+  assert.deepEqual((await result.json()).slots[lastDate + "|9"], ["Alex"]);
 
   const { event: future } = await (await call("", "POST", eventBody)).json();
   const visitor = await call("/" + future.id);

@@ -126,6 +126,10 @@ input::placeholder { color: #647168; }
 table { border-spacing: 0; table-layout: fixed; width: 100%; text-align: center; user-select: none; }
 thead th { background: #f7f9f4; border-bottom: 1px solid var(--line); padding: 1px; }
 thead th:first-child, tbody th { width: clamp(35px, 8vw, 54px); font-size: 11px; color: var(--muted); }
+th.date-gap, td.date-gap {
+  width: 7px; padding: 0; border: 0; background: #dce0de;
+}
+thead th.weekend { background: #e8efe6; }
 tbody th { background: #f7f9f4; padding: 0; line-height: 1; }
 tbody th, td { border-bottom: 1px solid #e5ebe1; }
 tr:last-child th, tr:last-child td { border-bottom: 0; }
@@ -137,6 +141,7 @@ td { border-left: 1px solid #e5ebe1; padding: 0; }
 }
 .slot:focus-visible { position: relative; z-index: 1; outline-offset: -2px; }
 .vote-slot { background: var(--slot-bg); }
+.weekend .vote-slot { background: #e9eee6; }
 .vote-slot span { visibility: hidden; }
 .vote-slot[aria-pressed=true] { background: #c8e4b4; color: #1b542e; }
 .vote-slot[aria-pressed=true] span { visibility: visible; }
@@ -169,6 +174,7 @@ td { border-left: 1px solid #e5ebe1; padding: 0; }
 .vote-guide ol { padding-left: 1.3em; margin: 10px 0; }
 .vote-guide li + li { margin-top: 6px; }
 .vote-guide p { color: var(--muted); }
+.vote-guide p + p { margin-top: 6px; }
 .guide-close {
   position: absolute; top: 6px; right: 6px; width: 40px; height: 40px;
   padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 23px;

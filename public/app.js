@@ -1,4 +1,4 @@
-import { calendarDates, expiryForDate, expiryLabel, shiftDate, todayInShanghai } from "./dates.js";
+import { calendarDates, daysBetween, expiryForDate, expiryLabel, maxDateSpan, shiftDate, todayInShanghai } from "./dates.js";
 import { bindDragSelection } from "./drag-select.js";
 
 const app = document.querySelector("#app");
@@ -139,6 +139,7 @@ function renderCreate() {
             <button class="button secondary compact" id="date-range" type="button"></button>
             <p class="field-help" id="date-hint" aria-live="polite"></p>
           </div>
+          <p class="status" id="date-status" role="status"></p>
           <div id="date-chips" class="date-chips"></div>
           <p class="field-help expiry-note" id="expiry-preview" aria-live="polite"></p>
           </section>
@@ -166,6 +167,7 @@ function renderCreate() {
   let month = today.slice(0, 7);
   const calendar = app.querySelector(".calendar-days");
   const chips = app.querySelector("#date-chips");
+  const dateStatus = app.querySelector("#date-status");
   const previous = app.querySelector("#prev-month");
   const next = app.querySelector("#next-month");
   let startHour = 9;
@@ -228,10 +230,11 @@ function renderCreate() {
 
   function showDates() {
     const sorted = [...dates].sort();
-    app.querySelector("#date-count").textContent = dates.size + " / 7 天";
+    const span = sorted.length ? daysBetween(sorted[0], sorted.at(-1)) + 1 : 0;
+    app.querySelector("#date-count").textContent = "已选 " + dates.size + " 天 · 首尾 " + span + " / 7 天";
     app.querySelector("#expiry-preview").textContent = sorted.length
       ? "北京时间 " + expiryLabel(expiryForDate(sorted.at(-1))) + " 失效，随后删除活动和答卷。"
-      : "选 1–7 天。最后一个候选日结束后，活动和答卷将自动删除。";
+      : "首尾合计最多 7 天，中间可以跳过日期。";
     for (const button of calendar.children) {
       button.setAttribute("aria-pressed", dates.has(button.dataset.calendarDate));
     }
@@ -242,30 +245,40 @@ function renderCreate() {
   }
   previous.onclick = () => {
     dateRange.reset();
+    dateStatus.textContent = "";
     month = shiftDate(month + "-01", -1).slice(0, 7);
     showCalendar();
   };
   next.onclick = () => {
     dateRange.reset();
+    dateStatus.textContent = "";
     month = shiftDate(month + "-01", 32).slice(0, 7);
     showCalendar();
   };
   function selectDates(first, last, before = dates) {
-      const start = first.dataset.calendarDate;
-      const end = last.dataset.calendarDate;
-      const step = start <= end ? 1 : -1;
-      const add = !before.has(start);
-      dates = new Set(before);
-      let message = "";
-      for (let date = start; step === 1 ? date <= end : date >= end; date = shiftDate(date, step)) {
-        if (!add) dates.delete(date);
-        else if (dates.size >= 7 && !dates.has(date)) {
-          message = "最多可选 7 个候选日期。";
+    const start = first.dataset.calendarDate;
+    const end = last.dataset.calendarDate;
+    const step = start <= end ? 1 : -1;
+    const add = !before.has(start);
+    const sorted = [...before].sort();
+    let earliest = sorted[0] ?? start;
+    let latest = sorted.at(-1) ?? start;
+    dates = new Set(before);
+    dateStatus.textContent = "";
+    for (let date = start; step === 1 ? date <= end : date >= end; date = shiftDate(date, step)) {
+      if (add) {
+        earliest = date < earliest ? date : earliest;
+        latest = date > latest ? date : latest;
+        if (daysBetween(earliest, latest) >= maxDateSpan) {
+          dateStatus.textContent = "候选日期首尾合计不能超过 7 天。";
           break;
-        } else dates.add(date);
+        }
+        dates.add(date);
+      } else {
+        dates.delete(date);
       }
-      setStatus(message);
-      showDates();
+    }
+    showDates();
   }
   const dateRange = bindTwoPointSelection(app.querySelector("#date-range"), app.querySelector("#date-hint"),
     "连选日期", ["点一天切换，也可以拖选。", "请选择范围的第一个日期。", "请选择范围的最后一个日期。"], selectDates);
@@ -273,7 +286,7 @@ function renderCreate() {
     snapshot: () => new Set(dates),
     restore: before => {
       dates = before;
-      setStatus("");
+      dateStatus.textContent = "";
       showDates();
     },
     preview: (first, last, before) => {
@@ -286,7 +299,7 @@ function renderCreate() {
     const chip = click.target.closest("[data-date]");
     if (!chip) return;
     dates.delete(chip.dataset.date);
-    setStatus("");
+    dateStatus.textContent = "";
     showDates();
     calendar.querySelector('[data-calendar-date="' + chip.dataset.date + '"]')?.focus();
   };
@@ -352,17 +365,29 @@ function dayCells(date) {
 
 function grid(mode, slots = {}, total = 0) {
   const result = mode === "results";
-  const header = event.dates.map(date => `
-    <th scope="col">${result
+  const columns = event.dates.flatMap((date, index) => {
+    const weekdayIndex = new Date(date).getUTCDay();
+    const weekend = weekdayIndex === 0 || weekdayIndex === 6;
+    const missing = index ? daysBetween(event.dates[index - 1], date) - 1 : 0;
+    return missing > 0 ? [{ missing }, { date, weekend }] : [{ date, weekend }];
+  });
+  const header = columns.map(({ date, weekend, missing }) => {
+    if (missing) {
+      const label = "跳过 " + missing + " 天";
+      return '<th class="date-gap" scope="col" title="' + label + '" aria-label="' + label + '"></th>';
+    }
+    return `<th scope="col"${weekend ? ' class="weekend"' : ""}>${result
       ? '<div class="day-header"><strong>' + dateText(date) + '</strong><span>' + weekday(date) + '</span></div>'
       : '<button class="day-header day-toggle" data-day="' + date + '" type="button"><strong>' +
-        dateText(date) + '</strong><span>' + weekday(date) + '</span><small></small></button>'}</th>`).join("");
+        dateText(date) + '</strong><span>' + weekday(date) + '</span><small></small></button>'}</th>`;
+  }).join("");
   const rows = makeHours(event).map(hour => {
-    const cells = event.dates.map(date => {
+    const cells = columns.map(({ date, weekend, missing }) => {
+      if (missing) return '<td class="date-gap" aria-hidden="true"></td>';
       const cell = date + "|" + hour;
       const count = slots[cell]?.length || 0;
       const label = dateLabel(date) + " " + hourText(hour) + "–" + hourText(hour + 1);
-      return `<td><button type="button" class="slot ${result ? "result-slot" : "vote-slot"}"
+      return `<td${weekend ? ' class="weekend"' : ""}><button type="button" class="slot ${result ? "result-slot" : "vote-slot"}"
         data-cell="${cell}" aria-label="${label}${result ? "，" + count + " 人有空" : ""}"
         ${result ? 'style="--fill:' + heatColor(count, total) + '"' : ""}>
         ${result ? count : '<span aria-hidden="true">✓</span>'}</button></td>`;
@@ -489,6 +514,7 @@ function renderVote() {
         <li>选一片时间时，可以拖动，也可以点「框选时段」，再点两个对角格。</li>
         <li>点「提交并查看热力图」。如果都来不了，点「这些时间我都来不了」。</li>
       </ol>
+      <p>窄灰条表示中间跳过了日期。浅色列是周六或周日。</p>
       <p>提交后可在热力图上点「修改我的时间」，更新原答卷。</p>
     </dialog>
   </div>`;

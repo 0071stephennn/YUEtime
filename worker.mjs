@@ -1,4 +1,4 @@
-import { expiryForDate, todayInShanghai } from "./public/dates.js";
+import { daysBetween, expiryForDate, maxDateSpan, todayInShanghai } from "./public/dates.js";
 
 const eventIdPattern = /^[0-9a-f-]{36}$/;
 const uuidPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
@@ -54,7 +54,7 @@ async function createEvent(request, db) {
   const body = await readBody(request);
   const title = cleanText(body.title, 80, "活动名须为 1–80 个字符。");
   const { dates, startHour, endHour } = body;
-  if (!Array.isArray(dates) || dates.length < 1 || dates.length > 7 ||
+  if (!Array.isArray(dates) || dates.length < 1 || dates.length > maxDateSpan ||
       !dates.every(isDate) || new Set(dates).size !== dates.length) {
     throw new RequestError("请选择 1–7 个不同的日期。");
   }
@@ -64,6 +64,9 @@ async function createEvent(request, db) {
   }
   dates.sort();
   if (dates[0] < todayInShanghai()) throw new RequestError("候选日期须为北京时间今天或之后。");
+  if (daysBetween(dates[0], dates.at(-1)) >= maxDateSpan) {
+    throw new RequestError("候选日期首尾合计不能超过 7 天。");
+  }
   const expiresAt = expiryForDate(dates.at(-1));
   const event = { id: crypto.randomUUID(), title, dates, startHour, endHour, expiresAt };
   await db.prepare(`

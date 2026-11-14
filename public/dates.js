@@ -1,4 +1,5 @@
 const day = 86_400_000;
+export const maxDateSpan = 7;
 const shanghaiDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai" });
 
 export function todayInShanghai(now = Date.now()) {
@@ -15,6 +16,10 @@ export function expiryLabel(expiresAt) {
 
 export function shiftDate(date, days) {
   return new Date(Date.parse(date) + days * day).toISOString().slice(0, 10);
+}
+
+export function daysBetween(first, last) {
+  return (Date.parse(last) - Date.parse(first)) / day;
 }
 
 export function calendarDates(month) {
