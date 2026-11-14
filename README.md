@@ -18,10 +18,17 @@ node server.mjs
 
 1. 在安装了 npm 的环境里运行 `npx wrangler login`。
 2. 运行 `npx wrangler d1 create yuetime`。将返回的数据库 ID 填到 `wrangler.toml` 的 `database_id`。
-3. 运行 `npx wrangler d1 execute yuetime --remote --file=schema.sql`。
+3. 运行 `npx wrangler d1 migrations apply DB --remote`。
 4. 运行 `npx wrangler deploy`，打开输出的 Worker 地址创建活动。
 
 部署说明以 [Workers 静态资源](https://developers.cloudflare.com/workers/static-assets/binding/) 和 [D1 入门文档](https://developers.cloudflare.com/d1/get-started/) 为准。
+
+## 活动到期和数据清理
+
+- 创建时手动选 1–7 个具体日期，可选北京时间今天及之后的日期。页面会显示失效时间。
+- 最后一个候选日的次日 00:00（北京时间），链接停止接受答卷和返回结果。例如最后一天是 12 月 6 日，12 月 7 日 00:00 失效。
+- Worker 的 Cron 每 5 分钟清理一次。数据库在同一条删除操作里清理到期活动及其所有答卷。本地服务启动时清理一次，运行期间每 5 分钟再清理。
+- D1 的 [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) 仍可恢复保留窗口内的数据。当前免费方案为 7 天，付费方案为 30 天。
 
 ## 答卷与热力图
 

@@ -8,7 +8,18 @@ import worker from "./worker.mjs";
 const databasePath = process.env.YUETIME_DB || fileURLToPath(new URL("./yuetime.sqlite", import.meta.url));
 const sqlite = new DatabaseSync(databasePath);
 sqlite.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-sqlite.exec(await readFile(new URL("./schema.sql", import.meta.url), "utf8"));
+sqlite.exec(await readFile(new URL("./migrations/0001_initial.sql", import.meta.url), "utf8"));
+const migration = await readFile(new URL("./migrations/0002_expiry.sql", import.meta.url), "utf8");
+sqlite.exec("BEGIN IMMEDIATE;");
+try {
+  if (!sqlite.prepare("SELECT name FROM pragma_table_info('events') WHERE name = 'expires_at'").get()) {
+    sqlite.exec(migration);
+  }
+  sqlite.exec("COMMIT;");
+} catch (error) {
+  sqlite.exec("ROLLBACK;");
+  throw error;
+}
 
 const DB = {
   prepare(sql) {
@@ -25,9 +36,17 @@ const DB = {
   },
 };
 
+async function cleanUpExpiredEvents() {
+  await worker.scheduled(null, { DB });
+}
+
+await cleanUpExpiredEvents();
+setInterval(() => { cleanUpExpiredEvents().catch(error => console.error(error)); }, 300_000).unref();
+
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/app.js", ["app.js", "text/javascript"]],
+  ["/dates.js", ["dates.js", "text/javascript"]],
   ["/style.css", ["style.css", "text/css"]],
 ]);
 

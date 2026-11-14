@@ -1,3 +1,5 @@
+import { expiryForDate, todayInShanghai } from "./public/dates.js";
+
 const eventIdPattern = /^[0-9a-f-]{36}$/;
 const uuidPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 
@@ -6,6 +8,14 @@ class RequestError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+function expiredEvent() {
+  return new RequestError("这场活动已过期。", 410);
+}
+
+function checkExpiry(event) {
+  if (Date.now() >= event.expiresAt) throw expiredEvent();
 }
 
 function json(data, status = 200, headers = {}) {
@@ -52,19 +62,26 @@ async function createEvent(request, db) {
       startHour < 0 || endHour > 24 || startHour >= endHour) {
     throw new RequestError("结束时间必须晚于开始时间。");
   }
-  const event = { id: crypto.randomUUID(), title, dates: dates.sort(), startHour, endHour };
-  await db.prepare("INSERT INTO events VALUES (?, ?, ?, ?, ?)")
-    .bind(event.id, title, JSON.stringify(event.dates), startHour, endHour).run();
+  dates.sort();
+  if (dates[0] < todayInShanghai()) throw new RequestError("候选日期须为北京时间今天或之后。");
+  const expiresAt = expiryForDate(dates.at(-1));
+  const event = { id: crypto.randomUUID(), title, dates, startHour, endHour, expiresAt };
+  await db.prepare(`
+    INSERT INTO events (id, title, dates, start_hour, end_hour, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(event.id, title, JSON.stringify(dates), startHour, endHour, expiresAt).run();
   return json({ event }, 201);
 }
 
 async function getEvent(db, id) {
   const row = await db.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
-  if (!row) throw new RequestError("找不到这场活动，请检查群链接。", 404);
-  return {
+  if (!row) throw new RequestError("这场活动已过期，或链接无效。", 404);
+  const event = {
     id: row.id, title: row.title, dates: JSON.parse(row.dates),
-    startHour: row.start_hour, endHour: row.end_hour,
+    startHour: row.start_hour, endHour: row.end_hour, expiresAt: row.expires_at,
   };
+  checkExpiry(event);
+  return event;
 }
 
 function getSession(request, event, create = false) {
@@ -77,7 +94,10 @@ function getSession(request, event, create = false) {
   const id = crypto.randomUUID();
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   const value = name + "=" + id + "; Path=/api/events/" + event.id;
-  return { id, headers: { "Set-Cookie": value + "; HttpOnly; SameSite=Lax; Max-Age=31536000" + secure } };
+  const seconds = Math.max(1, Math.ceil((event.expiresAt - Date.now()) / 1000));
+  // Browsers cap cookie lifetimes even when an event is scheduled farther in advance.
+  const maxAge = Math.min(seconds, 31_536_000);
+  return { id, headers: { "Set-Cookie": value + "; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure } };
 }
 
 async function getVote(db, event, session) {
@@ -103,10 +123,14 @@ async function saveVote(request, db, event, session) {
     throw new RequestError("请选择活动范围内的时间。");
   }
   const cells = [...new Set(body.cells)];
-  await db.prepare(`
-    INSERT INTO votes (event_id, session_id, name, cells) VALUES (?, ?, ?, ?)
+  checkExpiry(event);
+  const saved = await db.prepare(`
+    INSERT INTO votes (event_id, session_id, name, cells)
+    SELECT id, ?, ?, ? FROM events WHERE id = ? AND expires_at > unixepoch('now') * 1000
     ON CONFLICT (event_id, session_id) DO UPDATE SET name = excluded.name, cells = excluded.cells
-  `).bind(event.id, session.id, name, JSON.stringify(cells)).run();
+    RETURNING event_id
+  `).bind(session.id, name, JSON.stringify(cells), event.id).first();
+  if (!saved) throw expiredEvent();
   return json({ vote: { name, cells } });
 }
 
@@ -127,10 +151,15 @@ async function results(db, event, session) {
     const name = nameTotals.get(vote.name) > 1 ? vote.name + "（" + index + "）" : vote.name;
     for (const cell of JSON.parse(vote.cells)) slots[cell].push(name);
   }
+  checkExpiry(event);
   return json({ total: votes.length, slots });
 }
 
 export default {
+  async scheduled(_controller, env) {
+    await env.DB.prepare("DELETE FROM events WHERE expires_at <= ?").bind(Date.now()).run();
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
@@ -150,7 +179,9 @@ export default {
       const event = await getEvent(env.DB, parts[3]);
       const session = getSession(request, event, !parts[4] && request.method === "GET");
       if (!parts[4] && request.method === "GET") {
-        return json({ event, vote: await getVote(env.DB, event, session) }, 200, session.headers);
+        const vote = await getVote(env.DB, event, session);
+        checkExpiry(event);
+        return json({ event, vote }, 200, session.headers);
       }
       if (parts[4] === "vote" && request.method === "PUT") {
         return await saveVote(request, env.DB, event, session);

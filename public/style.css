@@ -64,7 +64,8 @@ input::placeholder { color: #647168; }
 #date-count { font-size: 12px; color: var(--muted); }
 .date-input, .hour-inputs { display: flex; gap: 10px; align-items: center; }
 .hour-inputs span { color: var(--muted); flex: 0 0 auto; font-size: 13px; }
-.date-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 11px 0 23px; }
+.date-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 11px 0 0; }
+.expiry-note { margin-bottom: 23px; }
 .date-chip { border: 1px solid #d9e5d4; color: #28533a; background: #edf4e9; border-radius: 7px; padding: 6px 8px; font-size: 12px; }
 .date-chip span { color: #4d6b55; padding-left: 3px; }
 .date-chip:hover { background: #dae9d5; }

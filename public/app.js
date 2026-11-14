@@ -1,3 +1,5 @@
+import { expiryForDate, expiryLabel, todayInShanghai } from "./dates.js";
+
 const app = document.querySelector("#app");
 const home = document.querySelector("#home-link");
 const eventId = new URL(location.href).searchParams.get("e");
@@ -30,7 +32,11 @@ const refreshIcon = '<span class="refresh-icon" aria-hidden="true">↻</span>';
 async function api(path, options) {
   const response = await fetch("./api/events" + path, options);
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "操作未完成，请重试。");
+  if (!response.ok) {
+    const error = new Error(data.error || "操作未完成，请重试。");
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -64,15 +70,6 @@ async function copyLink(button) {
   } catch {
     window.prompt("复制活动链接", shareUrl);
   }
-}
-
-function dateOffset(days) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return [
-    date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
 }
 
 function selectOptions(first, last, selected) {
@@ -122,34 +119,41 @@ function renderCreate() {
           <div class="date-label"><label class="field-label" for="date-picker">候选日期</label><span id="date-count"></span></div>
           <div class="date-input"><input id="date-picker" type="date" aria-label="添加候选日期"><button class="button secondary" type="button" id="add-date">添加</button></div>
           <div id="date-chips" class="date-chips"></div>
+          <p class="field-help expiry-note" id="expiry-preview" aria-live="polite"></p>
           <label class="field-label" for="start">每天的时间范围</label>
           <div class="hour-inputs">
             <select id="start" name="start" aria-label="开始时间">${selectOptions(0, 23, 9)}</select>
             <span aria-hidden="true">至</span>
             <select id="end" name="end" aria-label="结束时间">${selectOptions(1, 24, 23)}</select>
           </div>
-          <p class="field-help">按整小时填写，最多选 7 个日期。</p>
+          <p class="field-help">按北京时间填写，每格一小时。</p>
           <p class="status" data-status role="status"></p>
           <button class="button primary create-button" type="submit">创建活动并获取链接 ${arrow}</button>
         </form>
       </section>
     </div>`;
 
-  const dates = new Set([dateOffset(0), dateOffset(1), dateOffset(2)]);
+  const dates = new Set();
   const picker = app.querySelector("#date-picker");
   const add = app.querySelector("#add-date");
   const chips = app.querySelector("#date-chips");
-  picker.value = dateOffset(3);
+  picker.min = todayInShanghai();
   function showDates() {
+    const sorted = [...dates].sort();
     app.querySelector("#date-count").textContent = dates.size + " / 7 天";
+    app.querySelector("#expiry-preview").textContent = sorted.length
+      ? "北京时间 " + expiryLabel(expiryForDate(sorted.at(-1))) + " 失效，随后删除活动和答卷。"
+      : "选 1–7 天。最后一个候选日结束后，活动和答卷将自动删除。";
     add.disabled = dates.size >= 7;
-    chips.innerHTML = [...dates].sort().map(date => `
+    chips.innerHTML = sorted.map(date => `
       <button class="date-chip" type="button" data-date="${date}" aria-label="移除 ${dateLabel(date)}">
         ${dateLabel(date)} <span aria-hidden="true">×</span>
       </button>`).join("");
   }
   function addDate() {
     if (!picker.value) return setStatus("请先选一个日期。");
+    picker.min = todayInShanghai();
+    if (!picker.validity.valid) return setStatus("请选择北京时间今天或之后的日期。");
     if (dates.has(picker.value)) return setStatus("这个日期已经添加。");
     if (dates.size >= 7) return;
     dates.add(picker.value);
@@ -204,9 +208,30 @@ function eventHeading(label, description, tools = "") {
   return `
     <div class="event-heading">
       <div><div class="eyebrow">${heatIcon} ${label}</div><h1>${escape(event.title)}</h1>
-      <p class="muted">${description}</p></div>
+      <p class="muted">${description}</p>
+      <p class="field-help">北京时间 ${expiryLabel(event.expiresAt)} 失效，随后删除活动和答卷。</p></div>
       ${tools ? '<div class="heading-actions">' + tools + "</div>" : ""}
     </div>`;
+}
+
+function showUnavailable(message) {
+  app.innerHTML = '<div class="event-layout"><h1>活动不可用</h1><p class="muted">' +
+    escape(message) + '</p><a class="button secondary" href="./">返回首页</a></div>';
+}
+
+function handleUnavailable(error) {
+  if (error.status !== 404 && error.status !== 410) return false;
+  showUnavailable(errorText(error));
+  return true;
+}
+
+function checkPageExpiry() {
+  const remaining = event.expiresAt - Date.now();
+  if (remaining <= 0) {
+    showUnavailable("这场活动已过期。");
+    return;
+  }
+  setTimeout(checkPageExpiry, Math.min(remaining, 2_147_483_647));
 }
 
 function dayCells(date) {
@@ -363,6 +388,7 @@ function renderVote() {
       justCreated = false;
       await loadResults();
     } catch (error) {
+      if (handleUnavailable(error)) return;
       controls.forEach(control => { control.disabled = false; });
       markSelection();
       setStatus(errorText(error));
@@ -421,8 +447,13 @@ async function loadResults() {
   if (button) button.disabled = true;
   try {
     const data = await api("/" + eventId + "/results");
+    if (Date.now() >= event.expiresAt) {
+      showUnavailable("这场活动已过期。");
+      return;
+    }
     renderResults(data);
   } catch (error) {
+    if (handleUnavailable(error)) return;
     if (button) {
       setStatus(errorText(error));
       button.disabled = false;
@@ -448,9 +479,9 @@ async function init() {
     }
     if (vote) await loadResults();
     else renderVote();
+    checkPageExpiry();
   } catch (error) {
-    app.innerHTML = '<div class="event-layout"><h1>无法打开活动</h1><p class="muted">' +
-      escape(errorText(error)) + '</p><a class="button secondary" href="./">返回首页</a></div>';
+    showUnavailable(errorText(error));
   }
 }
 
