@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { expiryForDate, expiryLabel, shiftDate, todayInShanghai } from "../public/dates.js";
+import { displaySlots, eventExpiry, eventHours } from "../public/time-zone.js";
 import worker from "../worker.mjs";
 
 const initial = await readFile(new URL("../migrations/0001_initial.sql", import.meta.url), "utf8");
 const expiry = await readFile(new URL("../migrations/0002_expiry.sql", import.meta.url), "utf8");
+const zones = await readFile(new URL("../migrations/0003_time_zone.sql", import.meta.url), "utf8");
 
 test("Beijing midnight defines the last day and expiry", () => {
   assert.equal(todayInShanghai(Date.parse("2026-12-06T15:59:59Z")), "2026-12-06");
@@ -25,6 +27,8 @@ test("migration backfills the deadline and preserves existing votes", () => {
   sqlite.prepare("INSERT INTO votes VALUES (?, ?, ?, ?)")
     .run("legacy", "session", "Alex", '["2026-12-06|9"]');
   sqlite.exec(expiry);
+  sqlite.exec(zones);
+  assert.equal(sqlite.prepare("SELECT time_zone FROM events WHERE id = 'legacy'").get().time_zone, "Asia/Shanghai");
   assert.equal(sqlite.prepare("SELECT expires_at FROM events WHERE id = 'legacy'").get().expires_at,
     expiryForDate("2026-12-06"));
   assert.equal(sqlite.prepare("SELECT count(*) AS n FROM votes").get().n, 1);
@@ -37,6 +41,7 @@ test("only live, submitted sessions can access results and cleanup is scoped", a
   sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.exec(initial);
   sqlite.exec(expiry);
+  sqlite.exec(zones);
   const env = {
     DB: {
       prepare(sql) {
@@ -74,6 +79,8 @@ test("only live, submitted sessions can access results and cleanup is scoped", a
   const { event } = await create.json();
   assert.deepEqual(event.dates, [today, lastDate]);
   assert.equal(event.expiresAt, expiryForDate(lastDate));
+  assert.equal(event.timeZone, "Asia/Shanghai");
+  assert.equal(Object.keys(event.slotHours).length, 2);
   const path = "/" + event.id;
   const view = await call(path);
   const voteCookie = view.headers.get("Set-Cookie").split(";")[0];
@@ -102,4 +109,32 @@ test("only live, submitted sessions can access results and cleanup is scoped", a
   assert.equal(sqlite.prepare("SELECT count(*) AS n FROM votes").get().n, 1);
   await worker.scheduled(null, env);
   assert.equal(sqlite.prepare("SELECT count(*) AS n FROM events").get().n, 1);
+});
+
+test("display time zones can expand seven days to eight without changing vote keys", () => {
+  const first = "2027-01-07";
+  const dates = Array.from({ length: 7 }, (_, day) => shiftDate(first, day));
+  const timeZone = "America/New_York";
+  const slotHours = Object.fromEntries(dates.map(date => [date, eventHours(date, 9, 23, timeZone)]));
+  const event = { dates, startHour: 9, endHour: 23, timeZone, slotHours };
+  const columns = displaySlots(event, "Asia/Kolkata");
+  assert.deepEqual([...columns.keys()], Array.from({ length: 8 }, (_, day) => shiftDate(first, day)));
+  assert.equal(columns.get("2027-01-08").get("00:30").key, first + "|14");
+  const viewKeys = [...columns.values()].flatMap(column => [...column.values()].map(slot => slot.key));
+  assert.equal(viewKeys.length, 98);
+  assert.equal(new Set(viewKeys).size, 98);
+});
+
+test("time-zone rules determine slot instants and expiration", () => {
+  const zone = "America/New_York";
+  assert.equal(new Date(eventHours("2027-03-13", 9, 10, zone)[0]).toISOString(), "2027-03-13T14:00:00.000Z");
+  assert.equal(new Date(eventHours("2027-03-14", 9, 10, zone)[0]).toISOString(), "2027-03-14T13:00:00.000Z");
+  assert.equal(eventHours("2027-03-14", 1, 4, zone), null);
+  assert.equal(eventHours("2027-11-07", 0, 3, zone), null);
+  assert.equal(new Date(eventExpiry("2027-03-14", zone)).toISOString(), "2027-03-15T04:00:00.000Z");
+  const date = "2027-11-07";
+  const event = { dates: [date], startHour: 4, endHour: 8, slotHours: { [date]: eventHours(date, 4, 8, "UTC") } };
+  const repeated = displaySlots(event, zone).get(date);
+  assert.equal(repeated.get("01:00").key, date + "|5");
+  assert.equal(repeated.get("01:00#2").key, date + "|6");
 });

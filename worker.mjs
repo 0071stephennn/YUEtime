@@ -1,17 +1,20 @@
-import { daysBetween, expiryForDate, maxDateSpan, todayInShanghai } from "./public/dates.js";
+import { daysBetween, maxDateSpan } from "./public/dates.js";
+import { defaultZone, eventExpiry, eventHours, localTime, validTimeZone } from "./public/time-zone.js";
+import { messages } from "./public/messages.js";
 
 const eventIdPattern = /^[0-9a-f-]{36}$/;
 const uuidPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 
 class RequestError extends Error {
-  constructor(message, status = 400) {
-    super(message);
+  constructor(code, status = 400) {
+    super(messages.zh[code]);
+    this.code = code;
     this.status = status;
   }
 }
 
 function expiredEvent() {
-  return new RequestError("这场活动已过期。", 410);
+  return new RequestError("expired", 410);
 }
 
 function checkExpiry(event) {
@@ -27,7 +30,7 @@ function json(data, status = 200, headers = {}) {
 
 async function readBody(request) {
   if (!request.headers.get("Content-Type")?.startsWith("application/json")) {
-    throw new RequestError("请以 JSON 提交数据。", 415);
+    throw new RequestError("jsonType", 415);
   }
   try {
     const body = await request.json();
@@ -35,7 +38,7 @@ async function readBody(request) {
   } catch {
     // Return the same validation error for malformed JSON.
   }
-  throw new RequestError("提交的数据格式有误。");
+  throw new RequestError("badJson");
 }
 
 function isDate(date) {
@@ -52,36 +55,45 @@ function cleanText(value, max, error) {
 
 async function createEvent(request, db) {
   const body = await readBody(request);
-  const title = cleanText(body.title, 80, "活动名须为 1–80 个字符。");
-  const { dates, startHour, endHour } = body;
+  const title = cleanText(body.title, 80, "badTitle");
+  const { dates, startHour, endHour, timeZone = defaultZone } = body;
+  if (!validTimeZone(timeZone)) throw new RequestError("badZone");
   if (!Array.isArray(dates) || dates.length < 1 || dates.length > maxDateSpan ||
       !dates.every(isDate) || new Set(dates).size !== dates.length) {
-    throw new RequestError("请选择 1–7 个不同的日期。");
+    throw new RequestError("badDates");
   }
   if (!Number.isInteger(startHour) || !Number.isInteger(endHour) ||
       startHour < 0 || endHour > 24 || startHour >= endHour) {
-    throw new RequestError("结束时间必须晚于开始时间。");
+    throw new RequestError("badHours");
   }
   dates.sort();
-  if (dates[0] < todayInShanghai()) throw new RequestError("候选日期须为北京时间今天或之后。");
+  if (dates[0] < localTime(Date.now(), timeZone).date) throw new RequestError("pastDate");
   if (daysBetween(dates[0], dates.at(-1)) >= maxDateSpan) {
-    throw new RequestError("候选日期首尾合计不能超过 7 天。");
+    throw new RequestError("spanLimit");
   }
-  const expiresAt = expiryForDate(dates.at(-1));
-  const event = { id: crypto.randomUUID(), title, dates, startHour, endHour, expiresAt };
+  const slotHours = {};
+  for (const date of dates) {
+    const hours = eventHours(date, startHour, endHour, timeZone);
+    if (!hours) throw new RequestError("clockChange");
+    slotHours[date] = hours;
+  }
+  const expiresAt = eventExpiry(dates.at(-1), timeZone);
+  const event = { id: crypto.randomUUID(), title, dates, startHour, endHour, expiresAt, timeZone, slotHours };
   await db.prepare(`
-    INSERT INTO events (id, title, dates, start_hour, end_hour, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(event.id, title, JSON.stringify(dates), startHour, endHour, expiresAt).run();
+    INSERT INTO events (id, title, dates, start_hour, end_hour, expires_at, time_zone, slot_hours)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(event.id, title, JSON.stringify(dates), startHour, endHour, expiresAt, timeZone,
+    JSON.stringify(slotHours)).run();
   return json({ event }, 201);
 }
 
 async function getEvent(db, id) {
   const row = await db.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
-  if (!row) throw new RequestError("这场活动已过期，或链接无效。", 404);
+  if (!row) throw new RequestError("missingEvent", 404);
   const event = {
     id: row.id, title: row.title, dates: JSON.parse(row.dates),
     startHour: row.start_hour, endHour: row.end_hour, expiresAt: row.expires_at,
+    timeZone: row.time_zone, slotHours: row.slot_hours ? JSON.parse(row.slot_hours) : null,
   };
   checkExpiry(event);
   return event;
@@ -117,13 +129,13 @@ function eventCells(event) {
 }
 
 async function saveVote(request, db, event, session) {
-  if (!session.id) throw new RequestError("填写会话已失效，请重新打开活动页。", 403);
+  if (!session.id) throw new RequestError("noSession", 403);
   const body = await readBody(request);
-  const name = cleanText(body.name, 40, "名字须为 1–40 个字符。");
+  const name = cleanText(body.name, 40, "badName");
   const valid = new Set(eventCells(event));
   if (!Array.isArray(body.cells) || body.cells.length > valid.size ||
       !body.cells.every(cell => valid.has(cell))) {
-    throw new RequestError("请选择活动范围内的时间。");
+    throw new RequestError("badCells");
   }
   const cells = [...new Set(body.cells)];
   checkExpiry(event);
@@ -139,7 +151,7 @@ async function saveVote(request, db, event, session) {
 
 async function results(db, event, session) {
   if (!await getVote(db, event, session)) {
-    throw new RequestError("先提交你的时间，再查看热力图。", 403);
+    throw new RequestError("voteFirst", 403);
   }
   const { results: votes } = await db.prepare(
     "SELECT name, cells FROM votes WHERE event_id = ? ORDER BY rowid",
@@ -170,14 +182,14 @@ export default {
       const parts = url.pathname.split("/");
       if (request.method !== "GET") {
         const origin = request.headers.get("Origin");
-        if (origin && origin !== url.origin) throw new RequestError("请从活动页面提交。", 403);
+        if (origin && origin !== url.origin) throw new RequestError("badOrigin", 403);
       }
       if (url.pathname === "/api/events" && request.method === "POST") {
         return await createEvent(request, env.DB);
       }
       if (parts[2] !== "events" || !eventIdPattern.test(parts[3] || "") ||
           parts.length > 5 || (parts[4] && !["vote", "results"].includes(parts[4]))) {
-        throw new RequestError("找不到这个页面。", 404);
+        throw new RequestError("missingPage", 404);
       }
       const event = await getEvent(env.DB, parts[3]);
       const session = getSession(request, event, !parts[4] && request.method === "GET");
@@ -192,11 +204,11 @@ export default {
       if (parts[4] === "results" && request.method === "GET") {
         return await results(env.DB, event, session);
       }
-      throw new RequestError("这个操作不可用。", 405);
+      throw new RequestError("badMethod", 405);
     } catch (error) {
-      if (error instanceof RequestError) return json({ error: error.message }, error.status);
+      if (error instanceof RequestError) return json({ error: error.message, code: error.code }, error.status);
       console.error(error);
-      return json({ error: "暂时无法保存或读取数据，请重试。" }, 500);
+      return json({ error: messages.zh.serverError, code: "serverError" }, 500);
     }
   },
 };

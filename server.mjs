@@ -11,10 +11,14 @@ const sqlite = new DatabaseSync(databasePath);
 sqlite.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
 sqlite.exec(await readFile(new URL("./migrations/0001_initial.sql", import.meta.url), "utf8"));
 const migration = await readFile(new URL("./migrations/0002_expiry.sql", import.meta.url), "utf8");
+const zoneMigration = await readFile(new URL("./migrations/0003_time_zone.sql", import.meta.url), "utf8");
 sqlite.exec("BEGIN IMMEDIATE;");
 try {
   if (!sqlite.prepare("SELECT name FROM pragma_table_info('events') WHERE name = 'expires_at'").get()) {
     sqlite.exec(migration);
+  }
+  if (!sqlite.prepare("SELECT name FROM pragma_table_info('events') WHERE name = 'time_zone'").get()) {
+    sqlite.exec(zoneMigration);
   }
   sqlite.exec("COMMIT;");
 } catch (error) {
@@ -61,6 +65,9 @@ const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/app.js", ["app.js", "text/javascript"]],
   ["/dates.js", ["dates.js", "text/javascript"]],
+  ["/time-zone.js", ["time-zone.js", "text/javascript"]],
+  ["/i18n.js", ["i18n.js", "text/javascript"]],
+  ["/messages.js", ["messages.js", "text/javascript"]],
   ["/drag-select.js", ["drag-select.js", "text/javascript"]],
   ["/style.css", ["style.css", "text/css"]],
 ]);

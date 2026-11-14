@@ -179,6 +179,21 @@ td { border-left: 1px solid #e5ebe1; padding: 0; }
   padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 23px;
 }
 .guide-close:hover { background: #edf3ea; }
+.language-links {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 4px;
+  padding: 2px 5px; border-bottom: 1px solid var(--line);
+}
+.language-links button {
+  border: 1px solid transparent; border-radius: 4px; padding: 1px 4px;
+  background: transparent; color: var(--muted); font-size: 11px;
+}
+.language-links button[aria-pressed=true] { background: #e0ecd8; color: var(--ink); }
+.zone-picker { margin: 3px 0; max-width: 100%; white-space: normal; text-align: left; }
+.zone-dialog input { margin-top: 8px; }
+.zone-options { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.zone-options button { white-space: normal; overflow-wrap: anywhere; }
+.grid-tools .button, .selection-tools .button { white-space: normal; }
+.day-header small { overflow-wrap: anywhere; max-width: 100%; }
 @media (max-width: 520px) {
   .header-inner { min-height: 40px; padding-inline: 8px; }
   .brand { font-size: 16px; }
@@ -193,6 +208,7 @@ td { border-left: 1px solid #e5ebe1; padding: 0; }
   .vote-top .name-field { width: auto; flex: 1 1 90px; min-width: 90px; }
   .grid-tools { gap: 2px; }
   .button { padding-inline: 6px; font-size: 12px; }
+  .time-grid thead th:first-child, .time-grid tbody th { font-size: 9px; }
   .hour-options { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .slot { height: clamp(15px, calc((100dvh - 246px) / var(--rows) - 1px), 26px); }
 }
